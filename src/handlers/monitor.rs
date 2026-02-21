@@ -71,13 +71,6 @@ pub async fn list_monitors(
     Extension(user): Extension<AuthUser>,
     axum::extract::Query(params): axum::extract::Query<PaginationParams>,
 ) -> Result<Json<PaginatedResponse<MonitorDto>>> {
-    tracing::debug!(
-        user_id = %user.user_id,
-        page = params.page,
-        per_page = params.per_page,
-        "Fetching monitors"
-    );
-
     // Get total count
     let total: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM monitors WHERE user_id = $1"

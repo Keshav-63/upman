@@ -63,7 +63,6 @@ pub async fn start_checker(pool: PgPool) {
         tracing::info!(worker_id = %worker_id, "🔄 Checker worker started");
 
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
             .build()
             .unwrap();
 
@@ -77,8 +76,9 @@ pub async fn start_checker(pool: PgPool) {
             let rows = claim_jobs(&pool, 50).await;
 
             if rows.is_empty() {
-                if iteration % 20 == 0 {
-                    tracing::debug!(
+                // Only log idle state every 100 iterations (5 minutes)
+                if iteration % 100 == 0 {
+                    tracing::info!(
                         worker_id = %worker_id,
                         checks_performed = check_count,
                         "Worker idle - no jobs available"
@@ -88,11 +88,14 @@ pub async fn start_checker(pool: PgPool) {
                 continue;
             }
 
-            tracing::debug!(
-                worker_id = %worker_id,
-                jobs_claimed = rows.len(),
-                "Processing batch"
-            );
+            // Only log batch processing if jobs > 0
+            if rows.len() > 1 {
+                tracing::info!(
+                    worker_id = %worker_id,
+                    jobs_claimed = rows.len(),
+                    "Processing batch"
+                );
+            }
 
             for row in rows {
                 let id: Uuid = row.get("id");
@@ -102,38 +105,57 @@ pub async fn start_checker(pool: PgPool) {
                 let alert_email: Option<String> = row.get("alert_email");
                 let mut failure_count: i32 = row.get("failure_count");
 
-                // 2) Run HTTP check
+                // 2) Run HTTP check with timeout
                 let start = std::time::Instant::now();
-                let res = client.get(&url).send().await;
+                let res = tokio::time::timeout(
+                    Duration::from_secs(10),
+                    client.get(&url).send()
+                ).await;
 
                 let (is_up, status_code, response_time_ms, error_message) = match res {
-                    Ok(r) => {
+                    Ok(Ok(r)) => {
                         let status = r.status().as_u16() as i32;
                         let ms = start.elapsed().as_millis() as i32;
-                        tracing::debug!(
-                            monitor_id = %id,
-                            url = %url,
-                            status_code = status,
-                            response_time_ms = ms,
-                            "Check completed"
-                        );
-                        (status < 500, Some(status), Some(ms), None)
+                        let is_success = status >= 200 && status < 300;
+                        
+                        // Log non-2xx responses
+                        if !is_success {
+                            tracing::warn!(
+                                monitor_id = %id,
+                                url = %url,
+                                status_code = status,
+                                response_time_ms = ms,
+                                is_success = is_success,
+                                "Check completed with non-2xx status"
+                            );
+                        }
+                        (is_success, Some(status), Some(ms), None)
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
+                        let ms = start.elapsed().as_millis() as i32;
                         tracing::warn!(
                             monitor_id = %id,
                             url = %url,
                             error = %e,
-                            "Check failed"
+                            elapsed_ms = ms,
+                            "Check failed - HTTP error"
                         );
                         (false, None, None, Some(e.to_string()))
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            monitor_id = %id,
+                            url = %url,
+                            "Check failed - Timeout (10s)"
+                        );
+                        (false, None, None, Some("Request timeout after 10 seconds".to_string()))
                     }
                 };
 
                 check_count += 1;
 
                 // 3) Insert check
-                let _ = sqlx::query(
+                let check_result = sqlx::query(
                     r#"
                     INSERT INTO checks (monitor_id, checked_at, status_code, response_time_ms, is_up, error_message)
                     VALUES ($1, now(), $2, $3, $4, $5)
@@ -143,9 +165,17 @@ pub async fn start_checker(pool: PgPool) {
                 .bind(status_code)
                 .bind(response_time_ms)
                 .bind(is_up)
-                .bind(error_message)
+                .bind(&error_message)
                 .execute(&pool)
                 .await;
+
+                if let Err(e) = check_result {
+                    tracing::error!(
+                        monitor_id = %id,
+                        error = %e,
+                        "Failed to insert check record"
+                    );
+                }
 
                 // 4) Incident logic
                 let open_incident = sqlx::query(
@@ -159,7 +189,23 @@ pub async fn start_checker(pool: PgPool) {
 
                 if !is_up {
                     failure_count += 1;
+                    tracing::warn!(
+                        monitor_id = %id,
+                        url = %url,
+                        failure_count = failure_count,
+                        threshold = threshold,
+                        "Monitor is DOWN - incrementing failure count"
+                    );
                 } else {
+                    // Only log recovery if there were previous failures
+                    if failure_count > 0 {
+                        tracing::info!(
+                            monitor_id = %id,
+                            url = %url,
+                            previous_failures = failure_count,
+                            "✅ Monitor recovered"
+                        );
+                    }
                     failure_count = 0;
                 }
 
@@ -168,10 +214,11 @@ pub async fn start_checker(pool: PgPool) {
                         monitor_id = %id,
                         url = %url,
                         failure_count = failure_count,
+                        threshold = threshold,
                         "🚨 Opening incident - threshold reached"
                     );
 
-                    let _ = sqlx::query(
+                    let incident_result = sqlx::query(
                         r#"
                         INSERT INTO incidents (monitor_id, started_at, status, reason)
                         VALUES ($1, now(), 'open', 'Consecutive failures exceeded threshold')
@@ -181,10 +228,37 @@ pub async fn start_checker(pool: PgPool) {
                     .execute(&pool)
                     .await;
 
+                    match incident_result {
+                        Ok(_) => {
+                            tracing::info!(
+                                monitor_id = %id,
+                                url = %url,
+                                "✅ Incident created successfully"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                monitor_id = %id,
+                                error = %e,
+                                "❌ Failed to create incident"
+                            );
+                        }
+                    }
+
                     if let Some(email) = alert_email.clone() {
+                        tracing::info!(
+                            monitor_id = %id,
+                            email = %email,
+                            "📧 Sending alert email..."
+                        );
                         let subject = format!("🚨 DOWN: {}", url);
-                        let body = format!("Monitor is DOWN\n\nURL: {}\nTime: {}\n", url, Utc::now());
+                        let body = format!("Monitor is DOWN\n\nURL: {}\nTime: {}\nFailure Count: {}\n", url, Utc::now(), failure_count);
                         send_email(&email, &subject, &body).await;
+                    } else {
+                        tracing::warn!(
+                            monitor_id = %id,
+                            "No alert email configured - skipping email notification"
+                        );
                     }
                 }
 
@@ -223,17 +297,11 @@ pub async fn start_checker(pool: PgPool) {
                     format!("now() + interval '{} seconds'", interval_seconds)
                 } else {
                     let backoff = compute_backoff_seconds(failure_count) + jitter_seconds();
-                    tracing::debug!(
-                        monitor_id = %id,
-                        failure_count = failure_count,
-                        backoff_seconds = backoff,
-                        "Applying backoff"
-                    );
                     format!("now() + interval '{} seconds'", backoff)
                 };
 
                 // 6) Update scheduler state + release lease
-                let _ = sqlx::query(&format!(
+                let update_result = sqlx::query(&format!(
                     r#"
                     UPDATE monitors
                     SET
@@ -248,6 +316,16 @@ pub async fn start_checker(pool: PgPool) {
                 .bind(failure_count)
                 .execute(&pool)
                 .await;
+
+                if let Err(e) = update_result {
+                    tracing::error!(
+                        monitor_id = %id,
+                        error = %e,
+                        failure_count = failure_count,
+                        "Failed to update monitor state"
+                    );
+                }
+                // Don't log successful updates - too verbose
             }
 
             // Log metrics every 10 iterations

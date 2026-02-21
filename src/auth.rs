@@ -10,7 +10,43 @@ use jsonwebtoken::{decode, decode_header, DecodingKey, Validation, Algorithm};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::env;
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
+use std::collections::HashMap;
 use uuid::Uuid;
+
+// JWKS cache with TTL
+struct JwksCache {
+    keys: HashMap<String, (String, Instant)>,  // Store PEM string instead of DecodingKey
+    ttl: Duration,
+}
+
+impl JwksCache {
+    fn new() -> Self {
+        Self {
+            keys: HashMap::new(),
+            ttl: Duration::from_secs(3600), // Cache for 1 hour
+        }
+    }
+
+    fn get(&self, kid: &str) -> Option<String> {
+        self.keys.get(kid).and_then(|(pem, inserted_at)| {
+            if inserted_at.elapsed() < self.ttl {
+                Some(pem.clone())
+            } else {
+                None
+            }
+        })
+    }
+
+    fn insert(&mut self, kid: String, pem: String) {
+        self.keys.insert(kid, (pem, Instant::now()));
+    }
+}
+
+lazy_static::lazy_static! {
+    static ref JWKS_CACHE: Arc<RwLock<JwksCache>> = Arc::new(RwLock::new(JwksCache::new()));
+}
 
 #[derive(Debug, Deserialize)]
 struct JwksResponse {
@@ -32,6 +68,20 @@ struct Jwk {
 }
 
 async fn fetch_jwks_key(supabase_url: &str, kid: &str) -> Result<DecodingKey, AuthError> {
+    // Check cache first
+    {
+       let cache = JWKS_CACHE.read().unwrap();
+        if let Some(pem) = cache.get(kid) {
+            tracing::trace!("JWKS key found in cache for kid: {}", kid);
+            return DecodingKey::from_ec_pem(pem.as_bytes()).map_err(|e| {
+                tracing::error!("Failed to create decoding key from cached PEM: {:?}", e);
+                AuthError::ConfigError
+            });
+        }
+    }
+    
+    tracing::info!("Fetching JWKS from: {}/auth/v1/.well-known/jwks.json", supabase_url);
+    
     let jwks_url = format!("{}/auth/v1/.well-known/jwks.json", supabase_url);
     
     let response = reqwest::get(&jwks_url)
@@ -103,10 +153,18 @@ async fn fetch_jwks_key(supabase_url: &str, kid: &str) -> Result<DecodingKey, Au
                 .join("\n")
         );
         
-        DecodingKey::from_ec_pem(pem.as_bytes()).map_err(|e| {
+        let decoding_key = DecodingKey::from_ec_pem(pem.as_bytes()).map_err(|e| {
             tracing::error!("Failed to create decoding key from PEM: {:?}", e);
             AuthError::ConfigError
-        })
+        })?;
+        
+        // Cache the PEM string
+        {
+            let mut cache = JWKS_CACHE.write().unwrap();
+            cache.insert(kid.to_string(), pem);
+        }
+        
+        Ok(decoding_key)
     } else {
         tracing::error!("Unsupported key type or curve: {} {:?}", key.kty, key.crv);
         Err(AuthError::ConfigError)
@@ -194,8 +252,6 @@ pub async fn auth_middleware(
                 AuthError::InvalidToken
             })?;
             
-            tracing::debug!("Fetching JWKS from: {}/auth/v1/.well-known/jwks.json", supabase_url);
-            
             let decoding_key = fetch_jwks_key(&supabase_url, kid).await?;
             
             let mut validation = Validation::new(Algorithm::ES256);
@@ -222,7 +278,7 @@ pub async fn auth_middleware(
         AuthError::InvalidToken
     })?;
     
-    tracing::debug!(
+    tracing::trace!(
         "Authenticated user: {} ({})", 
         user_id, 
         claims.email.as_deref().unwrap_or("no-email")

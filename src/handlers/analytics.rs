@@ -133,7 +133,7 @@ pub async fn get_monitor_stats(
             WHERE monitor_id = $1 AND checked_at > now() - interval '30 days'
         ),
         response_time AS (
-            SELECT AVG(response_time_ms) as avg_response
+            SELECT AVG(response_time_ms)::float8 as avg_response
             FROM checks
             WHERE monitor_id = $1 
             AND checked_at > now() - interval '24 hours'
@@ -251,9 +251,9 @@ pub async fn get_latency(
           percentile_cont(0.50) WITHIN GROUP (ORDER BY response_time_ms) AS p50,
           percentile_cont(0.95) WITHIN GROUP (ORDER BY response_time_ms) AS p95,
           percentile_cont(0.99) WITHIN GROUP (ORDER BY response_time_ms) AS p99,
-          AVG(response_time_ms) as avg,
-          MIN(response_time_ms) as min,
-          MAX(response_time_ms) as max
+          AVG(response_time_ms)::float8 as avg,
+          MIN(response_time_ms)::float8 as min,
+          MAX(response_time_ms)::float8 as max
         FROM checks
         WHERE monitor_id = $1
           AND checked_at > now() - ($2 || ' days')::interval
