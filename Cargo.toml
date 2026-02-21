@@ -8,10 +8,25 @@ axum = "0.7"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# SQLx
+sqlx = { version = "0.7", features = ["postgres", "runtime-tokio", "chrono", "uuid"] }
+
+# HTTP client
 reqwest = { version = "0.12", features = ["json"] }
+
+# Logging
 tracing = "0.1"
 tracing-subscriber = "0.3"
-chrono = "0.4"
+
+# Time with serde support (THIS FIXES YOUR ERROR)
+chrono = { version = "0.4", features = ["serde"] }
+
+# Env
 dotenvy = "0.15"
-sqlx = { version = "0.7", features = ["postgres", "runtime-tokio", "chrono", "uuid"] }
+
+# UUID
 uuid = { version = "1", features = ["serde", "v4"] }
+
+# Email (THIS FIXES lettre ERROR)
+lettre = { version = "0.11", features = ["tokio1-native-tls", "smtp-transport", "builder"] }
