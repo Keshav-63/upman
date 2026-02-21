@@ -30,3 +30,17 @@ uuid = { version = "1", features = ["serde", "v4"] }
 
 # Email (THIS FIXES lettre ERROR)
 lettre = { version = "0.11", features = ["tokio1-native-tls", "smtp-transport", "builder"] }
+
+rand = "0.8"
+
+# JWT Authentication
+jsonwebtoken = "9"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+base64 = "0.22"
+
+# Better error handling
+thiserror = "1"
+anyhow = "1"
+
+# Logging
+tracing-appender = "0.2"
