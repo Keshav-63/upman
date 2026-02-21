@@ -1,2 +1,22 @@
-/target
+# Rust build output
+/target/
+
+# Cargo lock file for libraries
+Cargo.lock
+
+# Environment variables
 .env
+
+# Backup and temporary files
+*.rs.bk
+*.swp
+*.tmp
+
+# IDE/editor specific
+.vscode/
+.idea/
+*.iml
+
+# OS-specific
+.DS_Store
+Thumbs.db
