@@ -68,7 +68,7 @@ DEPLOYMENT.md            # Complete deployment guide
 - 📊 **Incident tracking** - Open/resolved status with duration
 - ⚙️ **Configurable thresholds** - Set failure count before alerting
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 - Rust 1.70+
