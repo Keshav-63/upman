@@ -33,7 +33,7 @@ DEPLOYMENT.md            # Complete deployment guide
 .env.example             # Environment template
 ```
 
-## Features
+## Features 
 
 ### 🔐 Authentication & Multi-Tenancy
 - ✅ **Supabase JWT validation** - Secure token-based auth
