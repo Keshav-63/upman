@@ -1,6 +1,6 @@
 # UpMan Backend
 
-Production-grade uptime monitoring backend built with Rust, featuring **Scheduler v3** with multi-worker safety, **Supabase JWT authentication**, crash-safe job leasing, and advanced analytics.
+Production grade uptime monitoring backend built with Rust, featuring **Scheduler v3** with multi worker safety, **Supabase JWT authentication**, crash-safe job leasing, and advanced analytics.
 
 ## Project Structure 
 
