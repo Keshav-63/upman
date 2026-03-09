@@ -1,3 +1,4 @@
 # Logs directory
 # Created automatically by tracing-appender
 *.log
+#.gitignore
