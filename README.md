@@ -36,7 +36,6 @@ DEPLOYMENT.md            # Complete deployment guide
 
 ## Features 
 
-
 ### 🔐 Authentication & Multi-Tenancy
 - ✅ **Supabase JWT validation** - Secure token-based auth
 - ✅ **User-scoped data** - Complete tenant isolation
