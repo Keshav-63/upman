@@ -182,7 +182,7 @@ pub async fn get_monitor_stats(
     }))
 }
 
-/// Get uptime percentage for a monitor
+/// Get uptime percentage for a monitor from db
 pub async fn get_uptime(
     State(pool): State<PgPool>,
     Extension(user): Extension<AuthUser>,
