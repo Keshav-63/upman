@@ -32,7 +32,6 @@ DEPLOYMENT.md            # Complete deployment guide
 .env.example             # Environment template
 ```
 
-
 ## Features 
 
 ### 🔐 Authentication & Multi-Tenancy
