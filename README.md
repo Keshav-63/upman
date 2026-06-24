@@ -31,7 +31,6 @@ logs/                    # Application logs (auto-created)
 DEPLOYMENT.md            # Complete deployment guide
 .env.example             # Environment template
 ```
-
 ## Features
 
 ### 🔐 Authentication & Multi-Tenancy
