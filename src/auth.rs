@@ -25,7 +25,7 @@ impl JwksCache {
     fn new() -> Self {
         Self {
             keys: HashMap::new(),
-            ttl: Duration::from_secs(3600), // Cache for 1 hour
+            ttl: Duration::from_secs(7200), // Cache for 2 hour
         }
     }
 
